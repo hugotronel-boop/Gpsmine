@@ -46,6 +46,12 @@ input::placeholder{color:#888}
 .acts{display:flex;flex-wrap:wrap;gap:10px}
 .acts .btn{flex:1 1 auto}
 #msg{margin:0;min-height:3.4em;font-size:8px;color:#222}
+.btn.on{background:#4f8a34;border-color:#8fd06a #2a4d1a #2a4d1a #8fd06a}
+#steps{list-style:none;margin:10px 0 0;padding:0;max-height:190px;overflow:auto;font-size:8px;line-height:1.6}
+#steps:empty{display:none}
+#steps li{display:grid;grid-template-columns:18px 1fr auto;gap:6px;padding:6px;border-bottom:2px solid #6f6f6f;color:#fff;text-shadow:1px 1px #000}
+#steps li.cur{background:#4f8a34}
+#steps b{font-weight:400;color:#ffd83a}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 @media (max-width:380px){body{font-size:9px}.nav{grid-template-columns:1fr}#cmp{margin:0 auto}}
 </style>
@@ -75,6 +81,22 @@ input::placeholder{color:#888}
    <p id="tdir" class="dim">Pose une balise pour guider la boussole.</p>
    <p id="teta" class="dim"></p>
   </div>
+ </section>
+
+ <section class="gui" aria-label="Itinéraire">
+  <form id="rf" autocomplete="off">
+   <label>Destination<input id="rd" placeholder="Adresse, lieu ou lat, lon (vide = balise choisie)"></label>
+   <div class="acts" id="modes">
+    <button class="btn on" type="button" data-m="foot">À pied</button>
+    <button class="btn" type="button" data-m="bike">Vélo</button>
+    <button class="btn" type="button" data-m="car">Voiture</button>
+   </div>
+   <div class="acts">
+    <button class="btn" type="submit">Calculer le trajet</button>
+    <button class="btn" type="button" id="rStop">Annuler</button>
+   </div>
+  </form>
+  <ol id="steps" class="well" aria-label="Feuille de route"></ol>
  </section>
 
  <div class="hotbar" id="bar" role="group" aria-label="Balises"></div>
@@ -138,6 +160,12 @@ function draw(){
    x.fillStyle=tile(tx,tz);x.fillRect(Math.round(cx+(tx*TM-px)*ppm),Math.round(cy+(tz*TM-pz)*ppm),ts,ts)}
  x.fillStyle='rgba(255,255,255,.6)';
  for(const[tx,tz]of trail)x.fillRect(Math.round(cx+(tx-px)*ppm)-2,Math.round(cy+(tz-pz)*ppm)-2,4,4);
+ if(route){x.save();x.lineJoin='round';x.lineCap='round';x.beginPath();
+  route.pts.forEach((q,i)=>{const[ax,az]=abs(q[0],q[1]),sx=cx+(ax-px)*ppm,sy=cy+(az-pz)*ppm;i?x.lineTo(sx,sy):x.moveTo(sx,sy)});
+  const lw=Math.max(5,ppm*5);x.strokeStyle='#000';x.lineWidth=lw+4;x.stroke();x.strokeStyle='#ffd83a';x.lineWidth=lw;x.stroke();
+  x.setLineDash([6,10]);x.strokeStyle='#fff8c0';x.lineWidth=2;x.stroke();x.restore();
+  const[dx,dz]=abs(route.la,route.lo),ex=Math.round(cx+(dx-px)*ppm),ey=Math.round(cy+(dz-pz)*ppm);
+  if(ex>8&&ex<W-8&&ey>8&&ey<H-8){x.fillStyle='#ffd83a66';x.fillRect(ex-3,0,6,ey);x.fillStyle='#ffd83a';x.fillRect(ex-8,ey-8,16,16);x.strokeStyle='#000';x.lineWidth=2;x.strokeRect(ex-8,ey-8,16,16);x.fillStyle='#000';x.fillRect(ex-1,ey-5,2,10);x.fillRect(ex-5,ey-1,10,2)}}
  wps.forEach((w,i)=>{
   const[wx,wz]=abs(w.lat,w.lon),sx=Math.round(cx+(wx-px)*ppm),sy=Math.round(cy+(wz-pz)*ppm),on=sx>6&&sx<W-6&&sy>6&&sy<H-6;
   if(i===sel){x.save();x.setLineDash([6,6]);x.strokeStyle='#fff';x.lineWidth=2;x.beginPath();x.moveTo(cx,cy);x.lineTo(sx,sy);x.stroke();x.restore()}
@@ -172,6 +200,7 @@ function info(){
  const w=wps[sel];
  if(P){const alt=P.alt!=null?Math.round(P.alt):'--';
   $('#hud').textContent=`Lat ${P.lat.toFixed(5)}\nLon ${P.lon.toFixed(5)}\nAlt ${alt}  ${card(heading)} ${Math.round(heading)}°\n${(P.spd*3.6).toFixed(1)} km/h${demo?'  DEMO':'  ±'+Math.round(P.acc)+' m'}\n${place}`}
+ if(P&&route){navRoute();return}
  if(!P||!w){compass(performance.now()/25);$('#tname').textContent='Aucune cible';$('#tdist').textContent='--';
   $('#tdir').textContent=P?'Pose une balise pour guider la boussole.':'En attente de position…';$('#teta').textContent='';return}
  const d=dist(P.lat,P.lon,w.lat,w.lon),b=bear(P.lat,P.lon,w.lat,w.lon),s=d/1.4;
@@ -200,7 +229,7 @@ function setPos(q,h){
 }
 function startGPS(){
  if(!navigator.geolocation)return startDemo('GPS indisponible');
- demo=false;wps=wps.filter(w=>!w.demo);sel=0;trail=[];gc=null;real=false;place='';if(P&&P.demo)P=null;bar();$('#dpad').classList.remove('on');$('#bDemo').textContent='Mode démo';
+ demo=false;wps=wps.filter(w=>!w.demo);sel=0;trail=[];gc=null;real=false;place='';route=null;listSteps();if(P&&P.demo)P=null;bar();$('#dpad').classList.remove('on');$('#bDemo').textContent='Mode démo';
  msg('Recherche du signal GPS…');
  if(watch!=null)navigator.geolocation.clearWatch(watch);
  watch=navigator.geolocation.watchPosition(p=>{if(demo)return;const c=p.coords;setPos({lat:c.latitude,lon:c.longitude,alt:c.altitude,acc:c.accuracy||0,spd:c.speed||0},c.heading);
@@ -209,7 +238,7 @@ function startGPS(){
 }
 function startDemo(why){
  if(watch!=null){navigator.geolocation.clearWatch(watch);watch=null}
- demo=true;gc=null;real=false;place='';$('#dpad').classList.add('on');$('#bDemo').textContent='Vrai GPS';
+ demo=true;gc=null;real=false;place='';route=null;listSteps();$('#dpad').classList.add('on');$('#bDemo').textContent='Vrai GPS';
  if(!P||!P.demo)setPos({lat:48.8566,lon:2.3522,alt:35,acc:0,spd:0,demo:1});
  P.demo=1;msg(why+'. Mode démo : flèches du clavier, WASD ou croix sur la carte.');bar();
 }
@@ -260,6 +289,71 @@ async function sync(){
  }catch(e){if(!warned){warned=true;msg('Carte réelle indisponible ici (réseau bloqué par l\'aperçu) : terrain généré. Sur ton site GitHub Pages, les vraies rues s\'affichent.')}}
  busy=false}
 $('#bLoc').onclick=startGPS;
+
+/* --- itinéraire (OSRM / OpenStreetMap) --- */
+const SRV={foot:'routed-foot',bike:'routed-bike',car:'routed-car'};
+const ARW={left:'←',right:'→','slight left':'↖','slight right':'↗','sharp left':'↙','sharp right':'↘',straight:'↑',uturn:'↶'};
+let route=null,mode='foot',rAt=0,rBusy=false;
+function say(s){
+ const m=s.maneuver,t=m.type,d=m.modifier,n=s.name?' sur '+s.name:'',
+ D={left:'à gauche',right:'à droite','slight left':'légèrement à gauche','slight right':'légèrement à droite','sharp left':'franchement à gauche','sharp right':'franchement à droite'}[d];
+ if(t==='depart')return'Démarre'+n;
+ if(t==='arrive')return'Tu es arrivé à destination';
+ if(/roundabout|rotary/.test(t))return'Au rond-point, prends la '+(m.exit||1)+(m.exit===1?'re':'e')+' sortie'+n;
+ if(d==='uturn')return'Fais demi-tour'+n;
+ if(t==='fork')return'Prends '+(D||'à droite')+' à la bifurcation'+n;
+ if(t==='end of road')return'Au bout de la route, tourne '+(D||'')+n;
+ if(t==='merge')return'Insère-toi'+n;
+ if(D&&t!=='continue'&&t!=='new name')return'Tourne '+D+n;
+ return'Continue tout droit'+n}
+const dur=s=>s<60?'moins d\'1 min':s<3600?Math.round(s/60)+' min':Math.floor(s/3600)+' h '+Math.round(s%3600/60)+' min';
+function listSteps(){
+ const ol=$('#steps');ol.innerHTML='';if(!route)return;
+ route.steps.forEach(st=>{const li=document.createElement('li'),a=document.createElement('span'),t=document.createElement('span'),d=document.createElement('b');
+  a.textContent=st.a;t.textContent=st.t;d.textContent=st.d?fmt(st.d):'';li.append(a,t,d);ol.appendChild(li)})}
+async function goTo(la,lo,name,quiet){
+ if(!P)return msg('Pas encore de position : attends le signal GPS ou lance le mode démo.');
+ if(rBusy)return;rBusy=true;if(!quiet)msg('Calcul du trajet…');
+ try{
+  const j=await(await fetch(`https://routing.openstreetmap.de/${SRV[mode]}/route/v1/driving/${P.lon},${P.lat};${lo},${la}?overview=full&geometries=geojson&steps=true`)).json();
+  if(!j.routes||!j.routes[0]){rBusy=false;return msg('Aucun itinéraire trouvé pour ce mode de transport.')}
+  const r=j.routes[0],pts=r.geometry.coordinates.map(c=>[c[1],c[0]]),cum=[0],steps=[];
+  for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+dist(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]));
+  r.legs.forEach(l=>l.steps.forEach(s=>{const lc=s.maneuver.location;let bi=0,bd=1e9;
+   pts.forEach((q,i)=>{const d=Math.abs(q[0]-lc[1])+Math.abs(q[1]-lc[0]);if(d<bd){bd=d;bi=i}});
+   steps.push({t:say(s),a:ARW[s.maneuver.modifier]||(s.maneuver.type==='arrive'?'⚑':'↑'),i:bi,d:s.distance})}));
+  route={pts,cum,steps,la,lo,name,dur:r.duration,idx:0,total:Math.max(1,cum[cum.length-1])};rAt=Date.now();listSteps();
+  if(!quiet)msg(`Trajet : ${fmt(route.total)}, environ ${dur(r.duration)}. Suis la ligne dorée.`)
+ }catch(e){msg('Itinéraire indisponible ici (réseau bloqué par l\'aperçu). Il fonctionne sur ton site HTTPS.')}
+ rBusy=false}
+function navRoute(){
+ const r=route;let bi=r.idx,bd=1e9;
+ for(let i=r.idx;i<Math.min(r.pts.length,r.idx+80);i++){const d=dist(P.lat,P.lon,r.pts[i][0],r.pts[i][1]);if(d<bd){bd=d;bi=i}}
+ r.idx=bi;
+ if(bd>60&&!rBusy&&Date.now()-rAt>15000){rAt=Date.now();msg('Hors itinéraire : recalcul…');goTo(r.la,r.lo,r.name,1)}
+ const rem=Math.max(0,r.total-r.cum[bi]+bd),nx=r.steps.find(q=>q.i>bi)||r.steps[r.steps.length-1],dn=Math.max(0,r.cum[nx.i]-r.cum[bi]+bd);
+ let k=bi;while(k<r.pts.length-1&&r.cum[k]-r.cum[bi]<30)k++;
+ compass(bear(P.lat,P.lon,r.pts[k][0],r.pts[k][1])-heading);
+ $('#tname').textContent='Vers : '+r.name;
+ const idx=r.steps.indexOf(nx);document.querySelectorAll('#steps li').forEach((l,i)=>l.classList.toggle('cur',i===idx));
+ if(rem<15){$('#tdist').textContent='Arrivé !';$('#tdir').textContent='Tu es à destination.';$('#teta').textContent='';return}
+ $('#tdist').textContent=nx.a+' '+fmt(dn);$('#tdir').textContent=nx.t;
+ $('#teta').textContent='Reste '+fmt(rem)+' · '+dur(r.dur*rem/r.total)}
+$('#rf').onsubmit=async e=>{e.preventDefault();
+ const q=$('#rd').value.trim();
+ if(!q){const w=wps[sel];return w?goTo(w.lat,w.lon,w.n):msg('Écris une destination ou sélectionne une balise.')}
+ const m=q.match(/^(-?\d+(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d+(?:[.,]\d+)?)$/);
+ if(m)return goTo(parseFloat(m[1].replace(',','.')),parseFloat(m[2].replace(',','.')),'Destination');
+ msg('Recherche de la destination…');
+ try{const vb=P?`&viewbox=${P.lon-.5},${P.lat+.5},${P.lon+.5},${P.lat-.5}`:'';
+  const r=await(await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=fr&q='+encodeURIComponent(q)+vb)).json();
+  if(!r[0])return msg('Destination introuvable. Précise la ville ou le code postal.');
+  goTo(+r[0].lat,+r[0].lon,(r[0].name||q.split(',')[0]).slice(0,22))}
+ catch(err){msg('Recherche indisponible ici. Saisis « latitude, longitude » ou ouvre le GPS sur ton site HTTPS.')}};
+document.querySelectorAll('#modes button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;
+ document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b));
+ if(route)goTo(route.la,route.lo,route.name)});
+$('#rStop').onclick=()=>{route=null;listSteps();msg('Itinéraire annulé.')};
 
 /* --- événements --- */
 $('#f').onsubmit=async e=>{e.preventDefault();
