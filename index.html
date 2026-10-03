@@ -272,7 +272,7 @@ const CT=50,CS=CT*TM,ORD={park:0,water:1,bld:2,path:3,road:4};
 function rast(els){
  const g=new Map(),ord={park:0,water:1,bld:2,path:3,road:4},it=[];
  for(const e of els){const t=e.tags||{},h=t.highway,pts=(e.geometry||[]).map(p=>abs(p.lat,p.lon));if(pts.length<2)continue;
-  const k=t.building?'bld':h?(/footway|path|cycleway|steps|pedestrian|track/.test(h)?'path':'road'):(t.natural==='water'||t.waterway)?'water':t.leisure==='park'?'park':0;
+  const k=t.building?'bld':h?(/footway|path|cycleway|steps|pedestrian|track/.test(h)?0:'road'):(t.natural==='water'||t.waterway)?'water':t.leisure==='park'?'park':0;
   if(k)it.push([k,pts])}
  it.sort((a,b)=>ord[a[0]]-ord[b[0]]);
  for(const[k,p]of it){
@@ -301,7 +301,7 @@ async function sync(){
   busy=ld=true;CH.set(key,'busy');
   const k=111320*Math.cos(ref.lat*R),w=ref.lon+a*CS/k,ea=ref.lon+(a+1)*CS/k,no=ref.lat-b*CS/110574,so=ref.lat-(b+1)*CS/110574,
   bx=`(${so},${w},${no},${ea})`,
-  qr=`[out:json][timeout:15];(way["highway"]${bx};way["building"]${bx};way["natural"="water"]${bx};way["waterway"]${bx};way["leisure"="park"]${bx};);out geom;`;
+  qr=`[out:json][timeout:15];(way["highway"]["highway"!~"footway|path|cycleway|steps|pedestrian|track|bridleway|corridor"]${bx};way["building"]${bx};way["natural"="water"]${bx};way["waterway"]${bx};way["leisure"="park"]${bx};);out geom;`;
   try{
    const j=await(await fetch('https://overpass-api.de/api/interpreter?data='+encodeURIComponent(qr))).json();
    if(!j.elements)throw 0;
