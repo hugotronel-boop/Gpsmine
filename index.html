@@ -52,6 +52,14 @@ input::placeholder{color:#888}
 #steps li{display:grid;grid-template-columns:18px 1fr auto;gap:6px;padding:6px;border-bottom:2px solid #6f6f6f;color:#fff;text-shadow:1px 1px #000}
 #steps li.cur{background:#4f8a34}
 #steps b{font-weight:400;color:#ffd83a}
+body.fs{overflow:hidden}
+body.fs .mapbox{position:fixed;inset:0;z-index:50;margin:0;border:0;outline:0}
+body.fs #map{height:100vh;height:100dvh}
+body.fs .zoom,body.fs #hud{top:calc(8px + env(safe-area-inset-top,0px))}
+body.fs .nav{position:fixed;z-index:60;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));padding:8px;gap:10px;grid-template-columns:auto 1fr}
+body.fs #cmp{width:84px;height:84px}
+body.fs .nav p{margin:0 0 3px}
+body.fs .dpad{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 @media (max-width:380px){body{font-size:9px}.nav{grid-template-columns:1fr}#cmp{margin:0 auto}}
 </style>
@@ -62,6 +70,7 @@ input::placeholder{color:#888}
   <canvas id="map" height="320"></canvas>
   <div id="hud" aria-live="off">Recherche du signal GPS…</div>
   <div class="zoom">
+   <button class="btn sq" id="fsb" aria-label="Plein écran">▣</button>
    <button class="btn sq" id="zi" aria-label="Zoom avant">+</button>
    <button class="btn sq" id="zo" aria-label="Zoom arrière">-</button>
   </div>
@@ -386,7 +395,18 @@ addEventListener('keydown',e=>{if(!demo||/INPUT/.test(document.activeElement.tag
 addEventListener('keyup',e=>{const k=KM[e.key];if(k)keys[k]=0});
 document.querySelectorAll('.dpad button').forEach(b=>{const k=b.dataset.k,off=()=>keys[k]=0;
  b.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=1});['pointerup','pointerleave','pointercancel'].forEach(t=>b.addEventListener(t,off))});
-function fit(){cv.width=Math.max(200,cv.clientWidth)}
+function fit(){cv.width=Math.max(200,cv.clientWidth);cv.height=Math.max(200,cv.clientHeight)}
+function setFs(on){
+ document.body.classList.toggle('fs',on);
+ const b=$('#fsb');b.textContent=on?'✕':'▣';b.setAttribute('aria-label',on?'Quitter le plein écran':'Plein écran');
+ try{const d=document.documentElement;
+  if(on){if(d.requestFullscreen)d.requestFullscreen().catch(()=>{})}
+  else if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}catch(e){}
+ scrollTo(0,0);fit();setTimeout(fit,120)}
+$('#fsb').onclick=()=>setFs(!document.body.classList.contains('fs'));
+addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('fs'))setFs(false)});
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFs(false)});
+addEventListener('orientationchange',()=>setTimeout(fit,250));
 addEventListener('resize',fit);fit();bar();setInterval(tick,100);startGPS();
 </script>
 </body>
