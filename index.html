@@ -159,7 +159,7 @@ function vn(x,z,s){const fx=x/s,fz=z/s,ix=Math.floor(fx),iz=Math.floor(fz),tx=fx
 a=hash(ix,iz),b=hash(ix+1,iz),c=hash(ix,iz+1),d=hash(ix+1,iz+1),u=tx*tx*(3-2*tx),v=tz*tz*(3-2*tz);
 return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v}
 const BIO=[[.36,['#3d6fd0','#4577d8']],[.4,['#d8c98a','#cfc080']],[.78,['#5d9b3a','#69a842']],[.9,['#7a5535','#6f4c2f']],[2,['#8a8a8a','#7c7c7c']]];
-function tile(x,z){const j0=hash(x+99,z-7)>.5?1:0;if(real){const o=G.get(x+','+z);if(o)return OSMC[o][j0];if(Math.hypot(x*TM-gcA[0],z*TM-gcA[1])<RAD)return BIO[2][1][j0]}const n=vn(x,z,9)*.65+vn(x,z,3)*.35,j=hash(x+99,z-7)>.5?1:0;for(const[t,c]of BIO)if(n<t)return c[j]}
+function tile(x,z){const j0=hash(x+99,z-7)>.5?1:0;if(real){const o=G.get(x+','+z);if(o)return OSMC[o][j0];return CH.get(Math.floor(x/CT)+','+Math.floor(z/CT))==='ok'?BIO[2][1][j0]:(j0?'#4f6d3a':'#56753f')}const n=vn(x,z,9)*.65+vn(x,z,3)*.35,j=hash(x+99,z-7)>.5?1:0;for(const[t,c]of BIO)if(n<t)return c[j]}
 
 /* --- dessin carte --- */
 const STEVE=["HHHHHHHH","HHHHHHHH","HSSSSSSH","SWBSSBWS","SSSnnSSS","SSbbbbSS","SbbbbbbS","SbbbbbbS"],
@@ -212,7 +212,7 @@ function compass(rel){
 function info(){
  const w=wps[sel];
  if(P){const alt=P.alt!=null?Math.round(P.alt):'--';
-  $('#hud').textContent=`Lat ${P.lat.toFixed(5)}\nLon ${P.lon.toFixed(5)}\nAlt ${alt}  ${card(heading)} ${Math.round(heading)}°\n${(P.spd*3.6).toFixed(1)} km/h${demo?'  DEMO':'  ±'+Math.round(P.acc)+' m'}\n${place}`}
+  $('#hud').textContent=`Lat ${P.lat.toFixed(5)}\nLon ${P.lon.toFixed(5)}\nAlt ${alt}  ${card(heading)} ${Math.round(heading)}°\n${(P.spd*3.6).toFixed(1)} km/h${demo?'  DEMO':'  ±'+Math.round(P.acc)+' m'}\n${ld?'Chargement…':place}`}
  if(P&&route){navRoute();return}
  if(!P||!w){compass(performance.now()/25);$('#tname').textContent='Aucune cible';$('#tdist').textContent='--';
   $('#tdir').textContent=P?'Pose une balise pour guider la boussole.':'En attente de position…';$('#teta').textContent='';return}
@@ -234,7 +234,7 @@ function bar(){
 
 /* --- position --- */
 function setPos(q,h){
- P=q;if(!ref)ref={lat:Math.round(q.lat),lon:Math.round(q.lon)};
+ P=q;if(!ref||dist(q.lat,q.lon,ref.lat,ref.lon)>30000){ref={lat:Math.round(q.lat),lon:Math.round(q.lon)};G=new Map();CH=new Map();real=false;trail=[]}
  if(h!=null&&!isNaN(h)&&!hasCmp&&q.spd>.7)heading=h;
  const[ax,az]=abs(q.lat,q.lon),l=trail[trail.length-1];
  if(!l||Math.hypot(ax-l[0],az-l[1])>3){trail.push([ax,az]);if(trail.length>400)trail.shift()}
@@ -242,7 +242,7 @@ function setPos(q,h){
 }
 function startGPS(){
  if(!navigator.geolocation)return startDemo('GPS indisponible');
- demo=false;wps=wps.filter(w=>!w.demo);sel=0;trail=[];gc=null;real=false;place='';route=null;listSteps();if(P&&P.demo)P=null;bar();$('#dpad').classList.remove('on');$('#bDemo').textContent='Mode démo';
+ demo=false;wps=wps.filter(w=>!w.demo);sel=0;trail=[];gc=null;real=false;G=new Map();CH=new Map();place='';route=null;listSteps();if(P&&P.demo)P=null;bar();$('#dpad').classList.remove('on');$('#bDemo').textContent='Mode démo';
  msg('Recherche du signal GPS…');
  if(watch!=null)navigator.geolocation.clearWatch(watch);
  watch=navigator.geolocation.watchPosition(p=>{if(demo)return;const c=p.coords;setPos({lat:c.latitude,lon:c.longitude,alt:c.altitude,acc:c.accuracy||0,spd:c.speed||0},c.heading);
@@ -251,7 +251,7 @@ function startGPS(){
 }
 function startDemo(why){
  if(watch!=null){navigator.geolocation.clearWatch(watch);watch=null}
- demo=true;gc=null;real=false;place='';route=null;listSteps();$('#dpad').classList.add('on');$('#bDemo').textContent='Vrai GPS';
+ demo=true;gc=null;real=false;G=new Map();CH=new Map();place='';route=null;listSteps();$('#dpad').classList.add('on');$('#bDemo').textContent='Vrai GPS';
  if(!P||!P.demo)setPos({lat:48.8566,lon:2.3522,alt:35,acc:0,spd:0,demo:1});
  P.demo=1;msg(why+'. Mode démo : flèches du clavier, WASD ou croix sur la carte.');bar();
 }
@@ -267,7 +267,8 @@ function tick(){
 
 /* --- vraie carte OpenStreetMap (si le réseau l'autorise) --- */
 const OSMC={road:['#7d7d7d','#707070'],path:['#b89a6a','#a88c5e'],bld:['#a65e3f','#9a553a'],water:['#3d6fd0','#4577d8'],park:['#4a8a2e','#53952f']},RAD=400;
-let G=new Map(),gc=null,gcA=[0,0],real=false,busy=false,tryAt=0,place='',warned=false;
+let G=new Map(),gc=null,gcA=[0,0],real=false,busy=false,tryAt=0,place='',warned=false,CH=new Map(),ld=false;
+const CT=50,CS=CT*TM,ORD={park:0,water:1,bld:2,path:3,road:4};
 function rast(els){
  const g=new Map(),ord={park:0,water:1,bld:2,path:3,road:4},it=[];
  for(const e of els){const t=e.tags||{},h=t.highway,pts=(e.geometry||[]).map(p=>abs(p.lat,p.lon));if(pts.length<2)continue;
@@ -289,18 +290,32 @@ function rast(els){
  }
  return g}
 async function sync(){
- if(!P||busy||Date.now()<tryAt)return;
- if(gc&&place&&dist(P.lat,P.lon,gc.lat,gc.lon)<150)return;
- busy=true;tryAt=Date.now()+20000;const{lat,lon}=P;
- try{
-  if(!gc||dist(lat,lon,gc.lat,gc.lon)>=150){
-   const a=`(around:${RAD},${lat},${lon})`,q=`[out:json][timeout:12];(way["highway"]${a};way["building"]${a};way["natural"="water"]${a};way["waterway"]${a};way["leisure"="park"]${a};);out geom;`;
-   const j=await(await fetch('https://overpass-api.de/api/interpreter?data='+encodeURIComponent(q))).json();
-   G=rast(j.elements);gc={lat,lon};gcA=abs(lat,lon);real=true;msg('Carte réelle chargée autour de toi.')}
-  const ad=(await(await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&accept-language=fr&lat=${lat}&lon=${lon}`)).json()).address||{};
-  place=((ad.road||ad.pedestrian||ad.neighbourhood||'')+' '+(ad.city||ad.town||ad.village||'')).trim().slice(0,28)||'Hors route'
- }catch(e){if(!warned){warned=true;msg('Carte réelle indisponible ici (réseau bloqué par l\'aperçu) : terrain généré. Sur ton site GitHub Pages, les vraies rues s\'affichent.')}}
- busy=false}
+ if(!P||!ref||busy||Date.now()<tryAt)return;
+ const ppm=PPM[zi],[ux,uz]=abs(P.lat,P.lon),vx=ux+pan[0],vz=uz+pan[1],hw=cv.width/2/ppm,hh=cv.height/2/ppm,want=[];
+ for(let a=Math.floor((vx-hw)/CS);a<=Math.floor((vx+hw)/CS);a++)for(let b=Math.floor((vz-hh)/CS);b<=Math.floor((vz+hh)/CS);b++){
+  const st=CH.get(a+','+b);
+  if(st==='ok'||st==='busy'||(typeof st==='number'&&Date.now()<st))continue;
+  want.push([a,b,Math.hypot((a+.5)*CS-vx,(b+.5)*CS-vz)])}
+ if(want.length){
+  want.sort((m,o)=>m[2]-o[2]);const[a,b]=want[0],key=a+','+b;
+  busy=ld=true;CH.set(key,'busy');
+  const k=111320*Math.cos(ref.lat*R),w=ref.lon+a*CS/k,ea=ref.lon+(a+1)*CS/k,no=ref.lat-b*CS/110574,so=ref.lat-(b+1)*CS/110574,
+  bx=`(${so},${w},${no},${ea})`,
+  qr=`[out:json][timeout:15];(way["highway"]${bx};way["building"]${bx};way["natural"="water"]${bx};way["waterway"]${bx};way["leisure"="park"]${bx};);out geom;`;
+  try{
+   const j=await(await fetch('https://overpass-api.de/api/interpreter?data='+encodeURIComponent(qr))).json();
+   if(!j.elements)throw 0;
+   for(const[kk,v]of rast(j.elements)){const o=G.get(kk);if(!o||ORD[v]>=ORD[o])G.set(kk,v)}
+   CH.set(key,'ok');if(!real){real=true;msg('Carte réelle chargée. Déplace la carte : chaque zone se charge à mesure.')}
+   tryAt=Date.now()+300}
+  catch(err){CH.set(key,Date.now()+30000);tryAt=Date.now()+6000;
+   if(!warned&&!real){warned=true;msg('Carte réelle indisponible ici (réseau bloqué par l\'aperçu) : terrain généré. Sur ton site GitHub Pages, les vraies rues s\'affichent.')}}
+  busy=ld=false;return}
+ if(!gc||dist(P.lat,P.lon,gc.lat,gc.lon)>150){
+  busy=true;gc={lat:P.lat,lon:P.lon};tryAt=Date.now()+1500;
+  try{const ad=(await(await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&accept-language=fr&lat=${P.lat}&lon=${P.lon}`)).json()).address||{};
+   place=((ad.road||ad.pedestrian||ad.neighbourhood||'')+' '+(ad.city||ad.town||ad.village||'')).trim().slice(0,28)||'Hors route'}catch(err){}
+  busy=false}}
 $('#bLoc').onclick=startGPS;
 
 /* --- itinéraire (OSRM / OpenStreetMap) --- */
