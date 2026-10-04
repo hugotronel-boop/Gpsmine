@@ -317,10 +317,10 @@ function rast(els,a,b){
  return g}
 
 /* terrain : une petite image par zone (32x32 blocs), dessinée une seule fois puis agrandie */
-const CC=new Map(),HX={};let ccG=null,dirty=true,lsig='';
+const CC=new Map(),CV=new Map(),HX={};const bump=k=>CV.set(k,(CV.get(k)||0)+1);let ccG=null,dirty=true,lsig='';
 const rgb=h=>HX[h]||(HX[h]=[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]);
 function chunkImg(a,b,okc){
- const key=a+','+b,tag=(okc?1:0)+(real?2:0),o=CC.get(key);
+ const key=a+','+b,tag=(okc?1:0)+(real?2:0)+'/'+(CV.get(key)||0),o=CC.get(key);
  if(o&&o.t===tag)return o.c;
  const c=o?o.c:document.createElement('canvas');c.width=c.height=CT;
  const g=c.getContext('2d'),im=g.createImageData(CT,CT),d=im.data;
@@ -343,26 +343,42 @@ function enc(g,a,b){let s='';for(let j=0;j<CT;j++)for(let i=0;i<CT;i++){const v=
 function dec(s,a,b){const g=new Map();for(let n=0;n<s.length;n++){const t=TCH[s[n]];if(t)g.set(K(a*CT+n%CT,b*CT+((n/CT)|0)),t)}return g}
 function readC(a,b){try{const v=localStorage.getItem(LK(a,b));if(!v)return null;const i=v.indexOf('|');if(Date.now()-(+v.slice(0,i))>12096e5)return null;return dec(v.slice(i+1),a,b)}catch(e){return null}}
 function saveC(a,b,g){try{localStorage.setItem(LK(a,b),Date.now()+'|'+enc(g,a,b))}catch(e){try{Object.keys(localStorage).filter(k=>k.startsWith('mcgc:')).forEach(k=>localStorage.removeItem(k))}catch(_){}}}
-function done(a,b,g){for(const[kk,v]of g)G.set(kk,v);CH.set(a+','+b,'ok');dv++;real=true}
+function done(a,b,g){for(const[kk,v]of g)G.set(kk,v);CH.set(a+','+b,'ok');bump(a+','+b);dv++;real=true}
 
-/* chargement : 4 zones en parallèle, serveurs répartis, serveurs de secours */
+/* chargement : routes/eau d'abord (léger), bâtiments ensuite ; 3 serveurs en course */
 const MIR=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
-let act=0,dv=0,mi=0,plAt=0;
+let act=0,actB=0,dv=0,mi=0,plAt=0;
+function race(qr){
+ return new Promise(res=>{
+  const cs=[],m0=mi;let fin=false,n=0,nx=0,tm=null;
+  const stop=(d,i)=>{if(fin)return;fin=true;clearTimeout(tm);cs.forEach(c=>c.abort());if(d)mi=i;res(d)},
+  go=async()=>{
+   if(fin||nx>=MIR.length)return;
+   const i=(m0+nx++)%MIR.length,c=new AbortController(),to=setTimeout(()=>c.abort(),16000);cs.push(c);
+   if(nx<MIR.length)tm=setTimeout(go,1200);
+   try{const r=await fetch(MIR[i]+'?data='+encodeURIComponent(qr),{signal:c.signal});if(!r.ok)throw 0;const d=await r.json();if(!d.elements)throw 0;stop(d,i)}
+   catch(e){if(++n>=MIR.length)stop(null);else{clearTimeout(tm);go()}}
+   finally{clearTimeout(to)}};
+  go()})}
+async function bld(a,b,bx,gref,tries){
+ actB++;
+ const j=await race(`[out:json][timeout:25];way["building"]${bx};out geom qt;`);
+ actB--;
+ if(gref!==G)return;
+ if(!j){if(tries<2)setTimeout(()=>{if(gref===G)bld(a,b,bx,gref,tries+1)},6000*(tries+1));return}
+ for(const[kk,v]of rast(j.elements,a,b)){const o=G.get(kk);if(!o||ORD[v]>=ORD[o])G.set(kk,v)}
+ bump(a+','+b);dv++;saveC(a,b,G)}
 async function load(a,b){
  const c=readC(a,b);if(c){done(a,b,c);return}
- const key=a+','+b,kf=111320*Math.cos(ref.lat*R),w=ref.lon+a*CS/kf,ea=ref.lon+(a+1)*CS/kf,no=ref.lat-b*CS/110574,so=ref.lat-(b+1)*CS/110574,bx=`(${so},${w},${no},${ea})`,
- qr=`[out:json][timeout:15];(way["highway"]["highway"!~"footway|path|cycleway|steps|pedestrian|track|bridleway|corridor"]${bx};way["building"]${bx};way["natural"="water"]${bx};way["waterway"]${bx};way["leisure"="park"]${bx};rel["natural"="water"]${bx};);out geom qt;`,gref=G,sl=(mi+act)%MIR.length;
- CH.set(key,'busy');act++;let j=null;
- for(let t=0;t<MIR.length&&!j;t++){
-  try{const r=await fetch(MIR[(sl+t)%MIR.length]+'?data='+encodeURIComponent(qr),{signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
-   if(!r.ok)throw 0;const d=await r.json();if(!d.elements)throw 0;j=d;mi=(sl+t)%MIR.length}catch(e){}}
- act--;
+ const key=a+','+b,kf=111320*Math.cos(ref.lat*R),w=ref.lon+a*CS/kf,ea=ref.lon+(a+1)*CS/kf,no=ref.lat-b*CS/110574,so=ref.lat-(b+1)*CS/110574,bx=`(${so},${w},${no},${ea})`,gref=G,
+ q1=`[out:json][timeout:15];(way["highway"]["highway"!~"footway|path|cycleway|steps|pedestrian|track|bridleway|corridor"]${bx};way["natural"="water"]${bx};way["waterway"]${bx};way["leisure"="park"]${bx};rel["natural"="water"]${bx};);out geom qt;`;
+ CH.set(key,'busy');act++;
+ const j=await race(q1);act--;
  if(gref!==G)return;
  if(!j){CH.set(key,Date.now()+30000);tryAt=Date.now()+4000;
   if(!warned&&!real){warned=true;msg('Carte réelle indisponible ici (réseau bloqué par l\'aperçu) : terrain généré. Sur ton site GitHub Pages, les vraies rues s\'affichent.')}return}
- const g=rast(j.elements,a,b);saveC(a,b,g);
- if(!real)msg('Carte réelle chargée. Déplace la carte : chaque zone se charge à mesure.');
- done(a,b,g)}
+ if(!real)msg('Carte réelle chargée : routes et eau d\'abord, les bâtiments arrivent juste après.');
+ done(a,b,rast(j.elements,a,b));bld(a,b,bx,gref,0)}
 async function sync(){
  if(!P||!ref)return;
  const ppm=PPM[zi],[ux,uz]=abs(P.lat,P.lon),vx=ux+pan[0],vz=uz+pan[1],hw=cv.width/2/ppm+CS/2,hh=cv.height/2/ppm+CS/2,want=[];
@@ -371,7 +387,7 @@ async function sync(){
   want.push([a,b,Math.hypot((a+.5)*CS-vx,(b+.5)*CS-vz)])}
  want.sort((m,o)=>m[2]-o[2]);
  if(Date.now()>=tryAt)while(act<4&&want.length){const[a,b]=want.shift();load(a,b)}
- ld=act>0||want.length>0;
+ ld=act>0||actB>0||want.length>0;
  if(!busy&&Date.now()>=plAt&&(!gc||dist(P.lat,P.lon,gc.lat,gc.lon)>150)){
   busy=true;gc={lat:P.lat,lon:P.lon};plAt=Date.now()+1500;
   try{const ad=(await(await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&accept-language=fr&lat=${P.lat}&lon=${P.lon}`)).json()).address||{};
