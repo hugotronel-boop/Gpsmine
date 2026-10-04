@@ -148,6 +148,7 @@ body.fs .dpad{bottom:calc(172px + env(safe-area-inset-bottom,0px))}
 const $=s=>document.querySelector(s),R=Math.PI/180;
 const PPM=[.5,1,2,4,8],TM=8,COL=['#e04040','#e0a030','#40c050','#30b0e0','#7060e0','#d050c0','#f0f0f0','#a0e030','#e07830'];
 const CARD=['N','NE','E','SE','S','SO','O','NO'];
+const K=(x,z)=>(x+8388608)*16777216+(z+8388608);
 let P=null,ref=null,heading=0,hasCmp=false,demo=false,watch=null,wps=[],sel=0,trail=[],zi=2,keys={u:0,d:0,l:0,r:0};
 let seeded=false,dseeded=false;
 try{const raw=localStorage.getItem('mcgps');seeded=raw!==null;wps=JSON.parse(raw||'[]')}catch(e){wps=[]}
@@ -168,7 +169,7 @@ function vn(x,z,s){const fx=x/s,fz=z/s,ix=Math.floor(fx),iz=Math.floor(fz),tx=fx
 a=hash(ix,iz),b=hash(ix+1,iz),c=hash(ix,iz+1),d=hash(ix+1,iz+1),u=tx*tx*(3-2*tx),v=tz*tz*(3-2*tz);
 return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v}
 const BIO=[[.36,['#3d6fd0','#4577d8']],[.4,['#d8c98a','#cfc080']],[.78,['#5d9b3a','#69a842']],[.9,['#7a5535','#6f4c2f']],[2,['#8a8a8a','#7c7c7c']]];
-function tile(x,z){const j0=hash(x+99,z-7)>.5?1:0;if(real){const o=G.get(x+','+z);if(o)return OSMC[o][j0];return CH.get(Math.floor(x/CT)+','+Math.floor(z/CT))==='ok'?BIO[2][1][j0]:(j0?'#4f6d3a':'#56753f')}const n=vn(x,z,9)*.65+vn(x,z,3)*.35,j=hash(x+99,z-7)>.5?1:0;for(const[t,c]of BIO)if(n<t)return c[j]}
+function tile(x,z){const j0=hash(x+99,z-7)>.5?1:0;if(real){const o=G.get(K(x,z));if(o)return OSMC[o][j0];return CH.get(Math.floor(x/CT)+','+Math.floor(z/CT))==='ok'?BIO[2][1][j0]:(j0?'#4f6d3a':'#56753f')}const n=vn(x,z,9)*.65+vn(x,z,3)*.35,j=hash(x+99,z-7)>.5?1:0;for(const[t,c]of BIO)if(n<t)return c[j]}
 
 /* --- dessin carte --- */
 const STEVE=["HHHHHHHH","HHHHHHHH","HSSSSSSH","SWBSSBWS","SSSnnSSS","SSbbbbSS","SbbbbbbS","SbbbbbbS"],
@@ -177,11 +178,12 @@ function draw(){
  const W=cv.width,H=cv.height,x=ctx;x.imageSmoothingEnabled=false;
  if(!P){x.fillStyle='#2b2b2b';x.fillRect(0,0,W,H);return}
  const ppm=PPM[zi],[ux,uz]=abs(P.lat,P.lon),px=ux+pan[0],pz=uz+pan[1],cx=W/2,cy=H/2,pcx=cx+(ux-px)*ppm,pcy=cy+(uz-pz)*ppm,ts=Math.ceil(TM*ppm)+1;
- terrain(x,px,pz,cx,cy,ppm);
+ x.fillStyle='#56753f';x.fillRect(0,0,W,H);terrain(x,px,pz,cx,cy,ppm);
  x.fillStyle='rgba(255,255,255,.6)';
  for(const[tx,tz]of trail)x.fillRect(Math.round(cx+(tx-px)*ppm)-2,Math.round(cy+(tz-pz)*ppm)-2,4,4);
  if(route){x.save();x.lineJoin='round';x.lineCap='round';x.beginPath();
-  route.pts.forEach((q,i)=>{const[ax,az]=abs(q[0],q[1]),sx=cx+(ax-px)*ppm,sy=cy+(az-pz)*ppm;i?x.lineTo(sx,sy):x.moveTo(sx,sy)});
+  if(route.rf!==ref){route.ab=route.pts.map(q=>abs(q[0],q[1]));route.rf=ref}
+  route.ab.forEach((q,i)=>{const sx=cx+(q[0]-px)*ppm,sy=cy+(q[1]-pz)*ppm;i?x.lineTo(sx,sy):x.moveTo(sx,sy)});
   const lw=Math.max(5,ppm*5);x.strokeStyle='#000';x.lineWidth=lw+4;x.stroke();x.strokeStyle='#ffd83a';x.lineWidth=lw;x.stroke();
   x.setLineDash([6,10]);x.strokeStyle='#fff8c0';x.lineWidth=2;x.stroke();x.restore();
   const[dx,dz]=abs(route.la,route.lo),ex=Math.round(cx+(dx-px)*ppm),ey=Math.round(cy+(dz-pz)*ppm);
@@ -269,7 +271,7 @@ function tick(){
    P.lat-=dz/n*st/110574;P.lon+=dx/n*st/(111320*Math.cos(P.lat*R));
    heading=(Math.atan2(dx,-dz)/R+360)%360;P.spd=16;setPos(P)}
   else P.spd=0}
- info();draw();sync();
+ info();chk();sync();
 }
 
 /* --- vraie carte OpenStreetMap (si le réseau l'autorise) --- */
@@ -294,7 +296,7 @@ function fill(p,k,put,X0,X1,Z0,Z1){
   for(let i=0;i+1<xs.length;i+=2)for(let x=Math.max(X0,Math.floor(xs[i]/TM));x<=Math.min(X1-1,Math.floor(xs[i+1]/TM));x++)put(x,z,k)}}
 function rast(els,a,b){
  const g=new Map(),X0=a*CT,X1=X0+CT,Z0=b*CT,Z1=Z0+CT,it=[],
- put=(x,z,k)=>{if(x>=X0&&x<X1&&z>=Z0&&z<Z1){const o=g.get(x+','+z);if(!o||ORD[k]>=ORD[o])g.set(x+','+z,k)}},
+ put=(x,z,k)=>{if(x>=X0&&x<X1&&z>=Z0&&z<Z1){const q=K(x,z),o=g.get(q);if(!o||ORD[k]>=ORD[o])g.set(q,k)}},
  xy=gm=>gm.map(q=>abs(q.lat,q.lon));
  for(const e of els){const t=e.tags||{},h=t.highway;
   if(e.type==='relation'){
@@ -314,34 +316,53 @@ function rast(els,a,b){
     for(let u=0;u<w;u++)for(let v=0;v<w;v++)put(x+u-o,z+v-o,k)}}}
  return g}
 
-/* terrain : image 1 pixel par bloc, dessinée hors écran puis agrandie */
-const tc=document.createElement('canvas'),tcx=tc.getContext('2d'),HX={};let cc2=null;
+/* terrain : une petite image par zone (32x32 blocs), dessinée une seule fois puis agrandie */
+const CC=new Map(),HX={};let ccG=null,dirty=true,lsig='';
 const rgb=h=>HX[h]||(HX[h]=[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]);
-function terrain(c,px,pz,cx,cy,ppm){
- const n0=Math.floor((px-cx/ppm)/TM),n1=Math.floor((px+cx/ppm)/TM),m0=Math.floor((pz-cy/ppm)/TM),m1=Math.floor((pz+cy/ppm)/TM),k=cc2;
- if(!k||k.G!==G||k.CH!==CH||k.dv!==dv||k.real!==real||n0<k.x0||n1>k.x1||m0<k.z0||m1>k.z1){
-  const M=10,x0=n0-M,x1=n1+M,z0=m0-M,z1=m1+M,w=x1-x0+1,h=z1-z0+1;tc.width=w;tc.height=h;
-  const im=tcx.createImageData(w,h),d=im.data;
-  for(let j=0;j<h;j++)for(let i=0;i<w;i++){const q=rgb(tile(x0+i,z0+j)),o=(j*w+i)*4;d[o]=q[0];d[o+1]=q[1];d[o+2]=q[2];d[o+3]=255}
-  tcx.putImageData(im,0,0);cc2={G,CH,dv,real,x0,x1,z0,z1}}
- const t=cc2;c.drawImage(tc,0,0,t.x1-t.x0+1,t.z1-t.z0+1,Math.round(cx+(t.x0*TM-px)*ppm),Math.round(cy+(t.z0*TM-pz)*ppm),(t.x1-t.x0+1)*TM*ppm,(t.z1-t.z0+1)*TM*ppm)}
+function chunkImg(a,b,okc){
+ const key=a+','+b,tag=(okc?1:0)+(real?2:0),o=CC.get(key);
+ if(o&&o.t===tag)return o.c;
+ const c=o?o.c:document.createElement('canvas');c.width=c.height=CT;
+ const g=c.getContext('2d'),im=g.createImageData(CT,CT),d=im.data;
+ for(let j=0;j<CT;j++)for(let i=0;i<CT;i++){const q=rgb(tile(a*CT+i,b*CT+j)),n=(j*CT+i)*4;d[n]=q[0];d[n+1]=q[1];d[n+2]=q[2];d[n+3]=255}
+ g.putImageData(im,0,0);CC.set(key,{c,t:tag});return c}
+function terrain(x,px,pz,cx,cy,ppm){
+ if(ccG!==G||CC.size>200){CC.clear();ccG=G}
+ const a1=Math.floor((px+cx/ppm)/CS),b1=Math.floor((pz+cy/ppm)/CS);
+ for(let a=Math.floor((px-cx/ppm)/CS);a<=a1;a++)for(let b=Math.floor((pz-cy/ppm)/CS);b<=b1;b++){
+  const X=Math.round(cx+(a*CS-px)*ppm),Y=Math.round(cy+(b*CS-pz)*ppm),X2=Math.round(cx+((a+1)*CS-px)*ppm),Y2=Math.round(cy+((b+1)*CS-pz)*ppm);
+  x.drawImage(chunkImg(a,b,CH.get(a+','+b)==='ok'),X,Y,X2-X,Y2-Y)}}
+function chk(){
+ const sg=[P?P.lat:0,P?P.lon:0,Math.round(heading),pan[0],pan[1],zi,dv,cv.width,cv.height,sel,wps.length,route?route.pts.length+'/'+route.idx:-1,trail.length,G.size].join();
+ if(sg!==lsig){lsig=sg;dirty=true}}
+function frame(){if(dirty){dirty=false;draw()}requestAnimationFrame(frame)}
 
-/* chargement : 3 zones en parallèle, serveurs de secours */
+/* zones déjà vues : mémorisées sur l'appareil (1 caractère par bloc), rechargées instantanément */
+const LK=(a,b)=>'mcgc:'+ref.lat+','+ref.lon+':'+a+','+b,TCH={p:'park',w:'water',b:'bld',r:'road'},TCC={park:'p',water:'w',bld:'b',road:'r'};
+function enc(g,a,b){let s='';for(let j=0;j<CT;j++)for(let i=0;i<CT;i++){const v=g.get(K(a*CT+i,b*CT+j));s+=v?TCC[v]:'.'}return s}
+function dec(s,a,b){const g=new Map();for(let n=0;n<s.length;n++){const t=TCH[s[n]];if(t)g.set(K(a*CT+n%CT,b*CT+((n/CT)|0)),t)}return g}
+function readC(a,b){try{const v=localStorage.getItem(LK(a,b));if(!v)return null;const i=v.indexOf('|');if(Date.now()-(+v.slice(0,i))>12096e5)return null;return dec(v.slice(i+1),a,b)}catch(e){return null}}
+function saveC(a,b,g){try{localStorage.setItem(LK(a,b),Date.now()+'|'+enc(g,a,b))}catch(e){try{Object.keys(localStorage).filter(k=>k.startsWith('mcgc:')).forEach(k=>localStorage.removeItem(k))}catch(_){}}}
+function done(a,b,g){for(const[kk,v]of g)G.set(kk,v);CH.set(a+','+b,'ok');dv++;real=true}
+
+/* chargement : 4 zones en parallèle, serveurs répartis, serveurs de secours */
 const MIR=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
 let act=0,dv=0,mi=0,plAt=0;
 async function load(a,b){
+ const c=readC(a,b);if(c){done(a,b,c);return}
  const key=a+','+b,kf=111320*Math.cos(ref.lat*R),w=ref.lon+a*CS/kf,ea=ref.lon+(a+1)*CS/kf,no=ref.lat-b*CS/110574,so=ref.lat-(b+1)*CS/110574,bx=`(${so},${w},${no},${ea})`,
- qr=`[out:json][timeout:20];(way["highway"]["highway"!~"footway|path|cycleway|steps|pedestrian|track|bridleway|corridor"]${bx};way["building"]${bx};way["natural"="water"]${bx};way["waterway"]${bx};way["leisure"="park"]${bx};rel["natural"="water"]${bx};);out geom;`,gref=G;
+ qr=`[out:json][timeout:15];(way["highway"]["highway"!~"footway|path|cycleway|steps|pedestrian|track|bridleway|corridor"]${bx};way["building"]${bx};way["natural"="water"]${bx};way["waterway"]${bx};way["leisure"="park"]${bx};rel["natural"="water"]${bx};);out geom qt;`,gref=G,sl=(mi+act)%MIR.length;
  CH.set(key,'busy');act++;let j=null;
  for(let t=0;t<MIR.length&&!j;t++){
-  try{const r=await fetch(MIR[(mi+t)%MIR.length]+'?data='+encodeURIComponent(qr),{signal:AbortSignal.timeout?AbortSignal.timeout(25000):undefined});
-   if(!r.ok)throw 0;const d=await r.json();if(!d.elements)throw 0;j=d;mi=(mi+t)%MIR.length}catch(e){}}
+  try{const r=await fetch(MIR[(sl+t)%MIR.length]+'?data='+encodeURIComponent(qr),{signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
+   if(!r.ok)throw 0;const d=await r.json();if(!d.elements)throw 0;j=d;mi=(sl+t)%MIR.length}catch(e){}}
  act--;
  if(gref!==G)return;
  if(!j){CH.set(key,Date.now()+30000);tryAt=Date.now()+4000;
   if(!warned&&!real){warned=true;msg('Carte réelle indisponible ici (réseau bloqué par l\'aperçu) : terrain généré. Sur ton site GitHub Pages, les vraies rues s\'affichent.')}return}
- for(const[kk,v]of rast(j.elements,a,b))G.set(kk,v);
- CH.set(key,'ok');dv++;if(!real){real=true;msg('Carte réelle chargée. Déplace la carte : chaque zone se charge à mesure.')}}
+ const g=rast(j.elements,a,b);saveC(a,b,g);
+ if(!real)msg('Carte réelle chargée. Déplace la carte : chaque zone se charge à mesure.');
+ done(a,b,g)}
 async function sync(){
  if(!P||!ref)return;
  const ppm=PPM[zi],[ux,uz]=abs(P.lat,P.lon),vx=ux+pan[0],vz=uz+pan[1],hw=cv.width/2/ppm+CS/2,hh=cv.height/2/ppm+CS/2,want=[];
@@ -349,7 +370,7 @@ async function sync(){
   const st=CH.get(a+','+b);if(st==='ok'||st==='busy'||(typeof st==='number'&&Date.now()<st))continue;
   want.push([a,b,Math.hypot((a+.5)*CS-vx,(b+.5)*CS-vz)])}
  want.sort((m,o)=>m[2]-o[2]);
- if(Date.now()>=tryAt)while(act<3&&want.length){const[a,b]=want.shift();load(a,b)}
+ if(Date.now()>=tryAt)while(act<4&&want.length){const[a,b]=want.shift();load(a,b)}
  ld=act>0||want.length>0;
  if(!busy&&Date.now()>=plAt&&(!gc||dist(P.lat,P.lon,gc.lat,gc.lon)>150)){
   busy=true;gc={lat:P.lat,lon:P.lon};plAt=Date.now()+1500;
@@ -472,7 +493,7 @@ $('#bp').onclick=()=>{
  if(wps.length>=9)return toast('Barre pleine : 9 balises maximum.');
  const[ux,uz]=abs(P.lat,P.lon),vx=ux+pan[0],vz=uz+pan[1],n='Balise '+(wps.length+1);
  wps.push({n,lat:ref.lat-vz/110574,lon:ref.lon+vx/(111320*Math.cos(ref.lat*R))});sel=wps.length-1;save();bar();toast(n+' posée ('+wps.length+'/9)')};
-function fit(){cv.width=Math.max(200,cv.clientWidth);cv.height=Math.max(200,cv.clientHeight)}
+function fit(){cv.width=Math.max(200,cv.clientWidth);cv.height=Math.max(200,cv.clientHeight);dirty=true}
 function setFs(on){
  document.body.classList.toggle('fs',on);
  const b=$('#fsb');b.textContent=on?'✕':'▣';b.setAttribute('aria-label',on?'Quitter le plein écran':'Plein écran');
@@ -484,7 +505,10 @@ $('#fsb').onclick=()=>setFs(!document.body.classList.contains('fs'));
 addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('fs'))setFs(false)});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFs(false)});
 addEventListener('orientationchange',()=>setTimeout(fit,250));
-addEventListener('resize',fit);fit();bar();setInterval(tick,100);startGPS();
+cv.addEventListener('pointermove',()=>{if(ptr.size)dirty=true});
+cv.addEventListener('wheel',()=>{dirty=true});
+['#zi','#zo','#rc'].forEach(q=>$(q).addEventListener('click',()=>{dirty=true}));
+addEventListener('resize',fit);fit();bar();setInterval(tick,100);startGPS();requestAnimationFrame(frame);
 </script>
 </body>
 </html>
