@@ -143,6 +143,7 @@ body.fs .dpad{bottom:calc(172px + env(safe-area-inset-bottom,0px))}
    <p id="msg" role="status">1 bloc = 1 mètre. Laisse latitude et longitude vides pour poser une balise ici.</p>
   </form>
  </section>
+<p style="margin:0;text-align:center;color:#ddd;font-size:8px;line-height:1.6">© OpenStreetMap · OpenMapTiles · OpenFreeMap</p>
 </main>
 
 <script>
@@ -390,6 +391,87 @@ async function load(a,b){
   if(!warned&&!real){warned=true;msg('Carte réelle indisponible ici (réseau bloqué par l\'aperçu) : terrain généré. Sur ton site GitHub Pages, les vraies rues s\'affichent.')}return}
  if(!real)msg('Carte réelle chargée : routes et eau d\'abord, les bâtiments arrivent juste après. Chaque zone est enregistrée sur ton appareil.');
  done(a,b,rast(j.elements,a,b));saveC(a,b,G,'a');bld(a,b,bx,gref,0)}
+/* tuiles vectorielles (OpenFreeMap) : une seule requête couvre ~80 zones, depuis un CDN */
+const N14=16384,t2lon=x=>x/N14*360-180,t2lat=y=>Math.atan(Math.sinh(Math.PI*(1-2*y/N14)))/R,
+lon2t=lo=>(lo+180)/360*N14,lat2t=la=>(1-Math.log(Math.tan(la*R)+1/Math.cos(la*R))/Math.PI)/2*N14;
+let VT=new Map(),tAct=0,TJ=null;
+const td=(b,s,e)=>new TextDecoder().decode(b.subarray(s,e));
+function uv(b,s,e){const o=[];let p=s;while(p<e){let r=0,m=1,c;do{c=b[p++];r+=(c&127)*m;m*=128}while(c&128);o.push(r)}return o}
+function pb(b,s,e,fn){let p=s;
+ const v=()=>{let r=0,m=1,c;do{c=b[p++];r+=(c&127)*m;m*=128}while(c&128);return r};
+ while(p<e){const k=v(),f=Math.floor(k/8),w=k&7;
+  if(w===0)fn(f,0,v());else if(w===2){const l=v();fn(f,2,p,p+l);p+=l}else if(w===5){fn(f,5,p);p+=4}else if(w===1){fn(f,1,p);p+=8}else throw 0}}
+function decodeTile(buf,tx,ty){
+ const[ox,oz]=abs(t2lat(ty),t2lon(tx)),[ex,ez]=abs(t2lat(ty+1),t2lon(tx+1)),out=[];
+ pb(buf,0,buf.length,(f,w,s,e)=>{if(f===3&&w===2)layer(s,e)});
+ function layer(s,e){
+  let name='',ext=4096;const keys=[],vals=[],fts=[];
+  pb(buf,s,e,(f,w,x,y)=>{
+   if(f===1&&w===2)name=td(buf,x,y);else if(f===5&&w===0)ext=x;else if(f===3&&w===2)keys.push(td(buf,x,y));
+   else if(f===4&&w===2){let sv=null;pb(buf,x,y,(g,ww,a,c)=>{if(g===1&&ww===2)sv=td(buf,a,c)});vals.push(sv)}
+   else if(f===2&&w===2)fts.push([x,y])});
+  if(!/^(transportation|building|water|waterway|park)$/.test(name))return;
+  const sx=(ex-ox)/ext,sz=(ez-oz)/ext;
+  for(const[s2,e2]of fts){
+   let type=0,tags=[],gs=0,ge=0;
+   pb(buf,s2,e2,(f,w,x,y)=>{if(f===3&&w===0)type=x;else if(f===2&&w===2)tags=uv(buf,x,y);else if(f===4&&w===2){gs=x;ge=y}});
+   const at={};for(let i=0;i+1<tags.length;i+=2)at[keys[tags[i]]]=vals[tags[i+1]];
+   let k=null,wd=1;
+   if(name==='building'&&type===3)k='bld';
+   else if(name==='water'&&type===3)k='water';
+   else if(name==='park'&&type===3)k='park';
+   else if(name==='waterway'&&type===2){k='water';wd=at.class==='river'?3:at.class==='canal'?2:1}
+   else if(name==='transportation'&&type===2&&at.brunnel!=='tunnel'){const c=at.class;if(/^(motorway|trunk|primary|secondary)$/.test(c)){k='road';wd=2}else if(/^(tertiary|minor|service)$/.test(c))k='road'}
+   if(!k)continue;
+   const g=uv(buf,gs,ge),parts=[];let x=0,y=0,i=0,cur=null;
+   while(i<g.length){const c=g[i++],id=c&7,n=Math.floor(c/8);
+    if(id===1||id===2){for(let t=0;t<n;t++){const dx=g[i++],dy=g[i++];x+=(dx>>>1)^-(dx&1);y+=(dy>>>1)^-(dy&1);if(id===1){cur=[];parts.push(cur)}cur.push(x,y)}}
+    else if(id===7&&cur&&type===3)cur.push(cur[0],cur[1])}
+   let x0=1e12,x1=-1e12,z0=1e12,z1=-1e12;
+   const P2=parts.filter(r=>r.length>=4).map(r=>{const a=new Float32Array(r.length);
+    for(let q=0;q<r.length;q+=2){a[q]=r[q]*sx;a[q+1]=r[q+1]*sz;const X=a[q]+ox,Z=a[q+1]+oz;if(X<x0)x0=X;if(X>x1)x1=X;if(Z<z0)z0=Z;if(Z>z1)z1=Z}return a});
+   if(P2.length)out.push({k,w:wd,p:P2,poly:type===3,bb:[x0,z0,x1,z1]})}}
+ return{f:out,ox,oz}}
+function fillR(T,rs,k,put,X0,X1,Z0,Z1){
+ let lo=1e12,hi=-1e12;for(const r of rs)for(let i=1;i<r.length;i+=2){const z=r[i]+T.oz;if(z<lo)lo=z;if(z>hi)hi=z}
+ for(let z=Math.max(Z0,Math.floor(lo/TM));z<=Math.min(Z1-1,Math.floor(hi/TM));z++){
+  const cz=(z+.5)*TM-T.oz,xs=[];
+  for(const r of rs){const n=r.length>>1;for(let i=0,j=n-1;i<n;j=i++){const ay=r[2*i+1],by=r[2*j+1];if((ay>cz)!==(by>cz))xs.push(r[2*i]+(cz-ay)*(r[2*j]-r[2*i])/(by-ay)+T.ox)}}
+  xs.sort((m,n)=>m-n);
+  for(let i=0;i+1<xs.length;i+=2)for(let x=Math.max(X0,Math.floor(xs[i]/TM));x<=Math.min(X1-1,Math.floor(xs[i+1]/TM));x++)put(x,z,k)}}
+function lineR(T,r,w,k,put){
+ const o=(w-1)>>1,n=r.length>>1;
+ for(let i=1;i<n;i++){const x0=r[2*i-2]+T.ox,z0=r[2*i-1]+T.oz,x1=r[2*i]+T.ox,z1=r[2*i+1]+T.oz,m=Math.max(1,Math.ceil(Math.hypot(x1-x0,z1-z0)/(TM/2)));
+  for(let t=0;t<=m;t++){const x=Math.floor((x0+(x1-x0)*t/m)/TM),z=Math.floor((z0+(z1-z0)*t/m)/TM);for(let u=0;u<w;u++)for(let v=0;v<w;v++)put(x+u-o,z+v-o,k)}}}
+function rastV(tl,a,b){
+ const g=new Map(),X0=a*CT,X1=X0+CT,Z0=b*CT,Z1=Z0+CT,mx0=X0*TM-8,mx1=X1*TM+8,mz0=Z0*TM-8,mz1=Z1*TM+8,
+ put=(x,z,k)=>{if(x>=X0&&x<X1&&z>=Z0&&z<Z1){const q=K(x,z),o=g.get(q);if(!o||ORD[k]>=ORD[o])g.set(q,k)}};
+ for(const T of tl)for(const f of T.f){const q=f.bb;if(q[2]<mx0||q[0]>mx1||q[3]<mz0||q[1]>mz1)continue;
+  if(f.poly){fillR(T,f.p,f.k,put,X0,X1,Z0,Z1);if(f.k==='park')continue;for(const r of f.p)lineR(T,r,1,f.k,put)}
+  else for(const r of f.p)lineR(T,r,f.w,f.k,put)}
+ return g}
+function tilesFor(a,b){
+ const kx=111320*ref.c,lo0=ref.lon+a*CS/kx,lo1=ref.lon+((a+1)*CS-1e-3)/kx,la0=ref.lat-b*CS/110574,la1=ref.lat-((b+1)*CS-1e-3)/110574,out=[];
+ for(let x=Math.floor(lon2t(lo0));x<=Math.floor(lon2t(lo1));x++)for(let y=Math.floor(lat2t(la0));y<=Math.floor(lat2t(la1));y++)out.push([x,y]);
+ return out}
+async function inflate(buf){
+ if(buf[0]===0x1f&&buf[1]===0x8b&&typeof DecompressionStream!=='undefined')
+  return new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+ return buf}
+async function getTile(tx,ty){
+ if(tAct>=6)return;
+ const k=tx+','+ty,old=VT.get(k),n=old&&old.n||0;
+ VT.set(k,{s:'busy',n});tAct++;
+ try{
+  if(!TJ){const j=await(await fetch('https://tiles.openfreemap.org/planet')).json();TJ=j.tiles[0]}
+  const r=await fetch(TJ.replace('{z}',14).replace('{x}',tx).replace('{y}',ty),{signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
+  let T={f:[],ox:0,oz:0};
+  if(r.status!==404&&r.status!==204){if(!r.ok)throw 0;T=decodeTile(await inflate(new Uint8Array(await r.arrayBuffer())),tx,ty)}
+  T.s='ok';T.rf=ref;VT.set(k,T);
+  if(VT.size>10)for(const[kk,v]of VT){if(VT.size<=10)break;if(kk!==k&&v.s==='ok')VT.delete(kk)}
+ }catch(e){TJ=null;VT.set(k,{s:'fail',n:n+1,t:Date.now()+15000})}
+ tAct--}
+
 function routeChunks(r){
  const ab=r.pts.map(q=>abs(q[0],q[1])),core=[],seen=new Set(),out=[];
  const add=(L,a,b)=>{const k=a+','+b;if(!seen.has(k)){seen.add(k);L.push([a,b])}};
@@ -425,8 +507,21 @@ async function sync(){
   if(!rpTxt&&!route.full){route.full=1;msg('Carte du trajet complète et enregistrée sur ton appareil.')}
  }else rpTxt='';
  want.sort((m,o)=>m[2]-o[2]);
- if(Date.now()>=tryAt)while(act<4&&want.length){const[a,b]=want.shift();load(a,b)}
- ld=act>0||actB>0||want.length>0;
+ const t0=performance.now();
+ for(const[a,b]of want){
+  if(performance.now()-t0>12)break;
+  const c=readC(a,b);
+  if(c&&c.c){done(a,b,c.g);continue}
+  if(c){if(Date.now()>=tryAt&&act<4)load(a,b);continue}
+  const tl=tilesFor(a,b);let ready=true,fb=false;
+  for(const[tx,ty]of tl){const o=VT.get(tx+','+ty);
+   if(!o||(o.s==='ok'&&o.rf!==ref)){getTile(tx,ty);ready=false}
+   else if(o.s==='busy')ready=false;
+   else if(o.s==='fail'){ready=false;if(o.n>=2)fb=true;else if(Date.now()>o.t)getTile(tx,ty)}}
+  if(fb){if(Date.now()>=tryAt&&act<4)load(a,b);continue}
+  if(ready){const first=!real;done(a,b,rastV(tl.map(t=>VT.get(t[0]+','+t[1])),a,b));saveC(a,b,G,'c');
+   if(first)msg('Carte réelle chargée. Chaque zone est enregistrée sur ton appareil.')}}
+ ld=act>0||actB>0||tAct>0||want.length>0;
  if(!busy&&Date.now()>=plAt&&(!gc||dist(P.lat,P.lon,gc.lat,gc.lon)>150)){
   busy=true;gc={lat:P.lat,lon:P.lon};plAt=Date.now()+1500;
   try{const ad=(await(await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&accept-language=fr&lat=${P.lat}&lon=${P.lon}`)).json()).address||{};
