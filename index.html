@@ -602,10 +602,34 @@ function listSteps(){
  const ol=$('#steps');ol.innerHTML='';if(!route)return;
  route.steps.forEach(st=>{const li=document.createElement('li'),a=document.createElement('span'),t=document.createElement('span'),d=document.createElement('b');
   a.textContent=st.a;t.textContent=st.t;d.textContent=st.d?fmt(st.d):'';li.append(a,t,d);ol.appendChild(li)})}
+/* voiture : Valhalla sait vraiment éviter les péages et dit si le trajet en comporte */
+function poly6(str){const out=[];let i=0,la=0,lo=0;
+ while(i<str.length){for(let k=0;k<2;k++){let r=0,sh=0,c;do{c=str.charCodeAt(i++)-63;r|=(c&31)<<sh;sh+=5}while(c>=32);const d=(r&1)?~(r>>1):(r>>1);if(k)lo+=d;else la+=d}out.push([la/1e6,lo/1e6])}
+ return out}
+const VA={9:'↗',10:'→',11:'↘',12:'↶',13:'↶',14:'↙',15:'←',16:'↖',18:'↗',20:'↗',23:'↗',19:'↖',21:'↖',24:'↖',4:'⚑',5:'⚑',6:'⚑'};
+async function valhalla(la,lo,strict){
+ const body={locations:[{lat:P.lat,lon:P.lon},{lat:la,lon:lo}],costing:'auto',directions_options:{language:'fr-FR',units:'kilometers'}};
+ if(noToll){const co={use_tolls:0};if(strict)co.exclude_tolls=true;body.costing_options={auto:co}}
+ return(await fetch('https://valhalla1.openstreetmap.de/route?json='+encodeURIComponent(JSON.stringify(body)))).json()}
+function setRoute(pts,cum,steps,dr,toll,tw,quiet,la,lo,name){
+ route={pts,cum,steps,la,lo,name,dur:dr,idx:0,toll,total:Math.max(1,cum[cum.length-1])};rAt=Date.now();listSteps();
+ if(!quiet){fitRoute();msg(`Trajet : ${fmt(route.total)}, environ ${dur(dr)}. ${toll?'Avec péage.':'Sans péage.'}${tw} La carte du départ à l\'arrivée se charge.`)}}
 async function goTo(la,lo,name,quiet){
  if(!P)return msg('Pas encore de position : attends le signal GPS ou lance le mode démo.');
  if(rBusy)return;rBusy=true;if(!quiet)msg('Calcul du trajet…');
  try{
+  if(mode==='car'){
+   try{
+    let v=await valhalla(la,lo,true);
+    if(noToll&&!v.trip)v=await valhalla(la,lo,false);
+    if(v.trip&&v.trip.legs&&v.trip.legs[0]){
+     const L0=v.trip.legs[0],pts=poly6(L0.shape),cum=[0];
+     for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+dist(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]));
+     const steps=L0.maneuvers.map(m=>({t:m.instruction,a:VA[m.type]||'↑',i:Math.min(m.begin_shape_index||0,pts.length-1),d:(m.length||0)*1000})),toll=!!v.trip.summary.has_toll;
+     setRoute(pts,cum,steps,v.trip.summary.time,toll,noToll&&toll?' Péage impossible à éviter sur ce trajet.':'',quiet,la,lo,name);
+     rBusy=false;return}
+   }catch(e){}
+  }
   const base=`https://routing.openstreetmap.de/${SRV[mode]}/route/v1/driving/${P.lon},${P.lat};${lo},${la}?overview=full&geometries=geojson&steps=true`,ex=mode==='car'&&noToll,
   hasToll=q=>q.legs.some(l=>l.steps.some(s=>(s.intersections||[]).some(i=>(i.classes||[]).includes('toll'))));
   let j=await(await fetch(base+(ex?'&exclude=toll':''))).json(),tollWarn='';
