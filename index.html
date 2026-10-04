@@ -111,6 +111,7 @@ body.fs .dpad{bottom:calc(172px + env(safe-area-inset-bottom,0px))}
     <button class="btn on" type="button" data-m="foot">À pied</button>
     <button class="btn" type="button" data-m="bike">Vélo</button>
     <button class="btn" type="button" data-m="car">Voiture</button>
+    <button class="btn" type="button" id="tollb" style="display:none">Péages autorisés</button>
    </div>
    <div class="acts">
     <button class="btn" type="submit">Calculer le trajet</button>
@@ -202,6 +203,7 @@ function draw(){
    const a=Math.atan2(sy-cy,sx-cx),r=Math.min(cx,cy)-16;x.save();x.translate(cx+Math.cos(a)*r,cy+Math.sin(a)*r);x.rotate(a);
    x.fillStyle=COL[i%9];x.strokeStyle='#000';x.lineWidth=2;x.beginPath();x.moveTo(10,0);x.lineTo(-8,-8);x.lineTo(-8,8);x.closePath();x.fill();x.stroke();x.restore()}
  });
+ labels(x,px,pz,cx,cy,ppm,W,H);
  x.save();x.translate(pcx,pcy);x.rotate(heading*R);x.fillStyle='#e03030';x.strokeStyle='#000';x.lineWidth=2;
  x.beginPath();x.moveTo(0,-24);x.lineTo(-7,-13);x.lineTo(7,-13);x.closePath();x.fill();x.stroke();x.restore();
  STEVE.forEach((r,j)=>[...r].forEach((c,i)=>{x.fillStyle=SC[c];x.fillRect(pcx-8+i*2,pcy-8+j*2,2,2)}));
@@ -336,7 +338,7 @@ function terrain(x,px,pz,cx,cy,ppm){
   const X=Math.round(cx+(a*CS-px)*ppm),Y=Math.round(cy+(b*CS-pz)*ppm),X2=Math.round(cx+((a+1)*CS-px)*ppm),Y2=Math.round(cy+((b+1)*CS-pz)*ppm);
   x.drawImage(chunkImg(a,b,CH.get(a+','+b)==='ok'),X,Y,X2-X,Y2-Y)}}
 function chk(){
- const sg=[P?P.lat:0,P?P.lon:0,Math.round(heading),pan[0],pan[1],zi,dv,cv.width,cv.height,sel,wps.length,route?route.pts.length+'/'+route.idx:-1,trail.length,G.size].join();
+ const sg=[P?P.lat:0,P?P.lon:0,Math.round(heading),pan[0],pan[1],zi,dv,cv.width,cv.height,sel,wps.length,route?route.pts.length+'/'+route.idx:-1,trail.length,G.size,lv].join();
  if(sg!==lsig){lsig=sg;dirty=true}}
 function frame(){if(dirty){dirty=false;draw()}requestAnimationFrame(frame)}
 
@@ -401,8 +403,8 @@ function pb(b,s,e,fn){let p=s;
  const v=()=>{let r=0,m=1,c;do{c=b[p++];r+=(c&127)*m;m*=128}while(c&128);return r};
  while(p<e){const k=v(),f=Math.floor(k/8),w=k&7;
   if(w===0)fn(f,0,v());else if(w===2){const l=v();fn(f,2,p,p+l);p+=l}else if(w===5){fn(f,5,p);p+=4}else if(w===1){fn(f,1,p);p+=8}else throw 0}}
-function decodeTile(buf,tx,ty){
- const[ox,oz]=abs(t2lat(ty),t2lon(tx)),[ex,ez]=abs(t2lat(ty+1),t2lon(tx+1)),out=[];
+function decodeTile(buf,tx,ty,lo){
+ const[ox,oz]=abs(t2lat(ty),t2lon(tx)),[ex,ez]=abs(t2lat(ty+1),t2lon(tx+1)),out=[],lb=[];
  pb(buf,0,buf.length,(f,w,s,e)=>{if(f===3&&w===2)layer(s,e)});
  function layer(s,e){
   let name='',ext=4096;const keys=[],vals=[],fts=[];
@@ -410,6 +412,16 @@ function decodeTile(buf,tx,ty){
    if(f===1&&w===2)name=td(buf,x,y);else if(f===5&&w===0)ext=x;else if(f===3&&w===2)keys.push(td(buf,x,y));
    else if(f===4&&w===2){let sv=null;pb(buf,x,y,(g,ww,a,c)=>{if(g===1&&ww===2)sv=td(buf,a,c)});vals.push(sv)}
    else if(f===2&&w===2)fts.push([x,y])});
+  if(name==='place'){
+   for(const[s2,e2]of fts){let type=0,tags=[],gs=0,ge=0;
+    pb(buf,s2,e2,(f,w,x,y)=>{if(f===3&&w===0)type=x;else if(f===2&&w===2)tags=uv(buf,x,y);else if(f===4&&w===2){gs=x;ge=y}});
+    if(type!==1)continue;
+    const at={};for(let i=0;i+1<tags.length;i+=2)at[keys[tags[i]]]=vals[tags[i+1]];
+    const nm=at['name:fr']||at.name;if(!nm||!/^(city|town|village|hamlet)$/.test(at.class))continue;
+    const g=uv(buf,gs,ge),x=(g[1]>>>1)^-(g[1]&1),y=(g[2]>>>1)^-(g[2]&1);
+    lb.push([nm,at.class,t2lat(ty+y/ext),t2lon(tx+x/ext)])}
+   return}
+  if(lo)return;
   if(!/^(transportation|building|water|waterway|park)$/.test(name))return;
   const sx=(ex-ox)/ext,sz=(ez-oz)/ext;
   for(const[s2,e2]of fts){
@@ -431,7 +443,7 @@ function decodeTile(buf,tx,ty){
    const P2=parts.filter(r=>r.length>=4).map(r=>{const a=new Float32Array(r.length);
     for(let q=0;q<r.length;q+=2){a[q]=r[q]*sx;a[q+1]=r[q+1]*sz;const X=a[q]+ox,Z=a[q+1]+oz;if(X<x0)x0=X;if(X>x1)x1=X;if(Z<z0)z0=Z;if(Z>z1)z1=Z}return a});
    if(P2.length)out.push({k,w:wd,p:P2,poly:type===3,bb:[x0,z0,x1,z1]})}}
- return{f:out,ox,oz}}
+ return{f:out,ox,oz,l:lb}}
 function fillR(T,rs,k,put,X0,X1,Z0,Z1){
  let lo=1e12,hi=-1e12;for(const r of rs)for(let i=1;i<r.length;i+=2){const z=r[i]+T.oz;if(z<lo)lo=z;if(z>hi)hi=z}
  for(let z=Math.max(Z0,Math.floor(lo/TM));z<=Math.min(Z1-1,Math.floor(hi/TM));z++){
@@ -466,12 +478,49 @@ async function getTile(tx,ty){
   if(!TJ){const j=await(await fetch('https://tiles.openfreemap.org/planet')).json();TJ=j.tiles[0]}
   const r=await fetch(TJ.replace('{z}',14).replace('{x}',tx).replace('{y}',ty),{signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
   let T={f:[],ox:0,oz:0};
-  if(r.status!==404&&r.status!==204){if(!r.ok)throw 0;T=decodeTile(await inflate(new Uint8Array(await r.arrayBuffer())),tx,ty)}
+  if(r.status!==404&&r.status!==204){if(!r.ok)throw 0;T=decodeTile(await inflate(new Uint8Array(await r.arrayBuffer())),tx,ty);saveL(tx+','+ty,T.l)}
   T.s='ok';T.rf=ref;VT.set(k,T);
   if(VT.size>10)for(const[kk,v]of VT){if(VT.size<=10)break;if(kk!==k&&v.s==='ok')VT.delete(kk)}
  }catch(e){TJ=null;VT.set(k,{s:'fail',n:n+1,t:Date.now()+15000})}
  tAct--}
 
+/* noms des villes et villages : mémorisés par tuile, affichés en plaques façon Minecraft */
+const LBL=new Map(),LF=new Map(),LW={city:12,town:10,village:9,hamlet:8},LZ={city:.125,town:.125,village:.25,hamlet:.5},LO={city:0,town:1,village:2,hamlet:3};
+let lAct=0,lv=0;
+function setL(k,l){LBL.set(k,l);lv++;if(LBL.size>80)LBL.delete(LBL.keys().next().value)}
+function saveL(k,l){setL(k,l);try{localStorage.setItem('mcgl:'+k,JSON.stringify(l))}catch(e){}}
+async function fetchLabels(tx,ty){
+ const k=tx+','+ty;lAct++;LBL.set(k,[]);
+ try{
+  if(!TJ){const j=await(await fetch('https://tiles.openfreemap.org/planet')).json();TJ=j.tiles[0]}
+  const r=await fetch(TJ.replace('{z}',14).replace('{x}',tx).replace('{y}',ty),{signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
+  let l=[];
+  if(r.status!==404&&r.status!==204){if(!r.ok)throw 0;l=decodeTile(await inflate(new Uint8Array(await r.arrayBuffer())),tx,ty,true).l}
+  saveL(k,l)
+ }catch(e){LBL.delete(k);LF.set(k,Date.now()+30000)}
+ lAct--}
+function ensureLabels(vx,vz,ppm){
+ if(!ref||ppm<.125)return;
+ const kx=111320*ref.c,x0=Math.floor(lon2t(ref.lon+(vx-cv.width/2/ppm)/kx)),x1=Math.floor(lon2t(ref.lon+(vx+cv.width/2/ppm)/kx)),
+ y0=Math.floor(lat2t(ref.lat-(vz-cv.height/2/ppm)/110574)),y1=Math.floor(lat2t(ref.lat-(vz+cv.height/2/ppm)/110574));
+ if((x1-x0+1)*(y1-y0+1)>12)return;
+ for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){const k=x+','+y;
+  if(LBL.has(k)||LF.get(k)>Date.now())continue;
+  try{const v=localStorage.getItem('mcgl:'+k);if(v){setL(k,JSON.parse(v));continue}}catch(e){}
+  if(lAct<2)fetchLabels(x,y)}}
+function labels(x,px,pz,cx,cy,ppm,W,H){
+ const all=[];
+ for(const arr of LBL.values())for(const l of arr){if(ppm<LZ[l[1]])continue;
+  if(l.rf!==ref){l.ab=abs(l[2],l[3]);l.rf=ref}
+  const sx=cx+(l.ab[0]-px)*ppm,sy=cy+(l.ab[1]-pz)*ppm;if(sx<-80||sx>W+80||sy<-20||sy>H+20)continue;all.push([l,sx,sy])}
+ all.sort((m,o)=>LO[m[0][1]]-LO[o[0][1]]);
+ const used=[];x.textAlign='center';x.textBaseline='middle';
+ for(const[l,sx,sy]of all){const z=LW[l[1]];x.font=z+'px "Press Start 2P",monospace';
+  const w=x.measureText(l[0]).width+8,h=z+8,rx=sx-w/2,ry=sy-h/2;
+  if(used.some(u=>rx<u[0]+u[2]&&rx+w>u[0]&&ry<u[1]+u[3]&&ry+h>u[1]))continue;
+  used.push([rx,ry,w,h]);x.fillStyle='rgba(0,0,0,.55)';x.fillRect(Math.round(rx),Math.round(ry),Math.round(w),h);
+  x.fillStyle='#000';x.fillText(l[0],Math.round(sx)+1,Math.round(sy)+1);x.fillStyle=l[1]==='city'?'#ffff55':'#fff';x.fillText(l[0],Math.round(sx),Math.round(sy))}
+ x.textAlign='start';x.textBaseline='alphabetic'}
 function routeChunks(r){
  const ab=r.pts.map(q=>abs(q[0],q[1])),core=[],seen=new Set(),out=[];
  const add=(L,a,b)=>{const k=a+','+b;if(!seen.has(k)){seen.add(k);L.push([a,b])}};
@@ -492,6 +541,7 @@ function fitRoute(){
 async function sync(){
  if(!P||!ref)return;
  const ppm=PPM[zi],[ux,uz]=abs(P.lat,P.lon),vx=ux+pan[0],vz=uz+pan[1],hw=cv.width/2/ppm+CS/2,hh=cv.height/2/ppm+CS/2,want=[];
+ ensureLabels(vx,vz,ppm);
  for(let a=Math.floor((vx-hw)/CS);a<=Math.floor((vx+hw)/CS);a++)for(let b=Math.floor((vz-hh)/CS);b<=Math.floor((vz+hh)/CS);b++){
   const st=CH.get(a+','+b);if(st==='ok'||st==='busy'||(typeof st==='number'&&Date.now()<st))continue;
   const d=Math.hypot((a+.5)*CS-vx,(b+.5)*CS-vz);want.push([a,b,d<600?d:1e6+d])}
@@ -534,7 +584,7 @@ $('#bClr').onclick=()=>{try{const ks=Object.keys(localStorage).filter(k=>k.start
 /* --- itinéraire (OSRM / OpenStreetMap) --- */
 const SRV={foot:'routed-foot',bike:'routed-bike',car:'routed-car'};
 const ARW={left:'←',right:'→','slight left':'↖','slight right':'↗','sharp left':'↙','sharp right':'↘',straight:'↑',uturn:'↶'};
-let route=null,mode='foot',rAt=0,rBusy=false;
+let route=null,mode='foot',rAt=0,rBusy=false,noToll=false;
 function say(s){
  const m=s.maneuver,t=m.type,d=m.modifier,n=s.name?' sur '+s.name:'',
  D={left:'à gauche',right:'à droite','slight left':'légèrement à gauche','slight right':'légèrement à droite','sharp left':'franchement à gauche','sharp right':'franchement à droite'}[d];
@@ -556,15 +606,21 @@ async function goTo(la,lo,name,quiet){
  if(!P)return msg('Pas encore de position : attends le signal GPS ou lance le mode démo.');
  if(rBusy)return;rBusy=true;if(!quiet)msg('Calcul du trajet…');
  try{
-  const j=await(await fetch(`https://routing.openstreetmap.de/${SRV[mode]}/route/v1/driving/${P.lon},${P.lat};${lo},${la}?overview=full&geometries=geojson&steps=true`)).json();
+  const base=`https://routing.openstreetmap.de/${SRV[mode]}/route/v1/driving/${P.lon},${P.lat};${lo},${la}?overview=full&geometries=geojson&steps=true`,ex=mode==='car'&&noToll,
+  hasToll=q=>q.legs.some(l=>l.steps.some(s=>(s.intersections||[]).some(i=>(i.classes||[]).includes('toll'))));
+  let j=await(await fetch(base+(ex?'&exclude=toll':''))).json(),tollWarn='';
+  if(ex&&!(j.routes&&j.routes[0])){j=await(await fetch(base+'&alternatives=3')).json();
+   const ok=(j.routes||[]).find(q=>!hasToll(q));if(ok)j.routes=[ok];else tollWarn=' Aucun trajet sans péage trouvé.'}
   if(!j.routes||!j.routes[0]){rBusy=false;return msg('Aucun itinéraire trouvé pour ce mode de transport.')}
-  const r=j.routes[0],pts=r.geometry.coordinates.map(c=>[c[1],c[0]]),cum=[0],steps=[];
+  const r=j.routes[0],toll=mode==='car'&&hasToll(r);
+  if(ex&&toll&&!tollWarn)tollWarn=' Péage impossible à éviter sur ce trajet.';
+  const pts=r.geometry.coordinates.map(c=>[c[1],c[0]]),cum=[0],steps=[];
   for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+dist(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]));
   r.legs.forEach(l=>l.steps.forEach(s=>{const lc=s.maneuver.location;let bi=0,bd=1e9;
    pts.forEach((q,i)=>{const d=Math.abs(q[0]-lc[1])+Math.abs(q[1]-lc[0]);if(d<bd){bd=d;bi=i}});
    steps.push({t:say(s),a:ARW[s.maneuver.modifier]||(s.maneuver.type==='arrive'?'⚑':'↑'),i:bi,d:s.distance})}));
-  route={pts,cum,steps,la,lo,name,dur:r.duration,idx:0,total:Math.max(1,cum[cum.length-1])};rAt=Date.now();listSteps();
-  if(!quiet){fitRoute();msg(`Trajet : ${fmt(route.total)}, environ ${dur(r.duration)}. La carte du départ à l\'arrivée se charge.`)}
+  route={pts,cum,steps,la,lo,name,dur:r.duration,idx:0,toll,total:Math.max(1,cum[cum.length-1])};rAt=Date.now();listSteps();
+  if(!quiet){fitRoute();msg(`Trajet : ${fmt(route.total)}, environ ${dur(r.duration)}.${mode==='car'?(toll?' Avec péage.':' Sans péage.'):''}${tollWarn} La carte du départ à l\'arrivée se charge.`)}
  }catch(e){msg('Itinéraire indisponible ici (réseau bloqué par l\'aperçu). Il fonctionne sur ton site HTTPS.')}
  rBusy=false}
 function navRoute(){
@@ -575,7 +631,7 @@ function navRoute(){
  const rem=Math.max(0,r.total-r.cum[bi]+bd),nx=r.steps.find(q=>q.i>bi)||r.steps[r.steps.length-1],dn=Math.max(0,r.cum[nx.i]-r.cum[bi]+bd);
  let k=bi;while(k<r.pts.length-1&&r.cum[k]-r.cum[bi]<30)k++;
  compass(bear(P.lat,P.lon,r.pts[k][0],r.pts[k][1])-heading);
- $('#tname').textContent='Vers : '+r.name;
+ $('#tname').textContent='Vers : '+r.name+(r.toll?' · péage':'');
  const idx=r.steps.indexOf(nx);document.querySelectorAll('#steps li').forEach((l,i)=>l.classList.toggle('cur',i===idx));
  if(rem<15){$('#tdist').textContent='Arrivé !';$('#tdir').textContent='Tu es à destination.';$('#teta').textContent='';return}
  const fs=document.body.classList.contains('fs');
@@ -592,9 +648,10 @@ $('#rf').onsubmit=async e=>{e.preventDefault();
   if(!r[0])return msg('Destination introuvable. Précise la ville ou le code postal.');
   goTo(+r[0].lat,+r[0].lon,(r[0].name||q.split(',')[0]).slice(0,22))}
  catch(err){msg('Recherche indisponible ici. Saisis « latitude, longitude » ou ouvre le GPS sur ton site HTTPS.')}};
-document.querySelectorAll('#modes button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;
- document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b));
+document.querySelectorAll('#modes button[data-m]').forEach(b=>b.onclick=()=>{mode=b.dataset.m;$('#tollb').style.display=mode==='car'?'':'none';
+ document.querySelectorAll('#modes button[data-m]').forEach(x=>x.classList.toggle('on',x===b));
  if(route)goTo(route.la,route.lo,route.name)});
+$('#tollb').onclick=()=>{noToll=!noToll;$('#tollb').textContent=noToll?'Sans péage':'Péages autorisés';$('#tollb').classList.toggle('on',noToll);if(route)goTo(route.la,route.lo,route.name)};
 $('#rStop').onclick=()=>{route=null;listSteps();msg('Itinéraire annulé.')};
 
 /* --- événements --- */
